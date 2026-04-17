@@ -13,10 +13,10 @@ const certificateSchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
-    holderEmail: {
+    nim: {
       type: String,
       required: true,
-      lowercase: true,
+      unique: true,
       trim: true,
     },
     score: {
@@ -94,7 +94,6 @@ const certificateSchema = new mongoose.Schema(
 );
 
 // Index untuk pencarian cepat
-certificateSchema.index({ holderEmail: 1 });
 certificateSchema.index({ merkleRoot: 1 });
 certificateSchema.index({ batchId: 1 });
 certificateSchema.index({ status: 1 });

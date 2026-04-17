@@ -1,7 +1,7 @@
 const QRCode = require("qrcode");
 const { PDFDocument } = require("pdf-lib");
 const cloudinary = require("../config/cloudinary");
-const axios = require("axios");
+const fs = require("fs");
 
 /**
  * Generate QR Code sebagai PNG buffer
@@ -23,65 +23,101 @@ const generateQRBuffer = async (certId) => {
  */
 const uploadBufferToCloudinary = (buffer, folder, publicId) => {
   return new Promise((resolve, reject) => {
-    const stream = cloudinary.uploader.upload_stream(
-      { folder, public_id: publicId, resource_type: "auto" },
-      (error, result) => {
-        if (error) reject(error);
-        else resolve(result);
-      },
-    );
-    stream.end(buffer);
+    try {
+      const stream = cloudinary.uploader.upload_stream(
+        {
+          folder: folder,
+          public_id: publicId,
+          resource_type: "raw", // WAJIB untuk PDF
+          format: "pdf",
+          type: "upload",
+          access_mode: "public", // PASTIKAN format PDF
+        },
+        (error, result) => {
+          if (error) {
+            console.error("❌ Cloudinary upload error:", error);
+            return reject(error);
+          }
+
+          console.log("✅ Upload sukses ke Cloudinary");
+          resolve(result);
+        }
+      );
+
+      // 🔥 pastikan buffer valid
+      if (!buffer || buffer.length === 0) {
+        return reject(new Error("Buffer kosong!"));
+      }
+
+      stream.end(buffer);
+    } catch (err) {
+      reject(err);
+    }
   });
 };
 
 /**
- * Embed QR Code ke PDF lalu upload ke Cloudinary
+ * Embed QR Code ke PDF (PAKAI FILE LOKAL)
  */
-const embedQRToPDF = async (pdfUrl, certId) => {
-  const { buffer: qrBuffer, verifyUrl } = await generateQRBuffer(certId);
+const embedQRToPDF = async (pdfPath, certId) => {
+  try {
+    console.log("📄 PDF PATH (LOCAL):", pdfPath);
 
-  // Download PDF dari Cloudinary
-  const pdfResponse = await axios.get(pdfUrl, { responseType: "arraybuffer" });
-  const pdfBytes = Buffer.from(pdfResponse.data);
+    const { buffer: qrBuffer, verifyUrl } = await generateQRBuffer(certId);
 
-  // Load PDF dan embed QR
-  const pdfDoc = await PDFDocument.load(pdfBytes);
-  const qrImage = await pdfDoc.embedPng(qrBuffer);
-  const pages = pdfDoc.getPages();
-  const firstPage = pages[0];
+    // ✅ BACA FILE LOKAL
+    const pdfBytes = fs.readFileSync(pdfPath);
 
-  firstPage.drawImage(qrImage, {
-    x: 20,
-    y: 20,
-    width: 80,
-    height: 80,
-  });
+    // Load PDF
+    const pdfDoc = await PDFDocument.load(pdfBytes);
 
-  const modifiedPdfBytes = await pdfDoc.save();
+    // Embed QR
+    const qrImage = await pdfDoc.embedPng(qrBuffer);
 
-  // Upload PDF dengan QR ke Cloudinary
-  const result = await uploadBufferToCloudinary(
-    Buffer.from(modifiedPdfBytes),
-    "toefl-certificates-with-qr",
-    `cert_${certId}`,
-  );
+    const pages = pdfDoc.getPages();
+    const firstPage = pages[0];
 
-  // Generate base64 QR untuk response
-  const base64QR = await QRCode.toDataURL(verifyUrl, {
-    errorCorrectionLevel: "H",
-    width: 300,
-    margin: 2,
-  });
+    firstPage.drawImage(qrImage, {
+      x: 20,
+      y: 20,
+      width: 80,
+      height: 80,
+    });
 
-  return {
-    outputPath: result.secure_url,
-    verifyUrl,
-    base64QR,
-  };
+    // Save PDF hasil
+    const modifiedPdfBytes = await pdfDoc.save();
+
+    //cek ukuran pdf
+     console.log("pdf size : ", modifiedPdfBytes.length);
+    // Upload hasil ke Cloudinary
+    const result = await uploadBufferToCloudinary(
+      Buffer.from(modifiedPdfBytes),
+      "toefl-certificates-with-qr",
+      `cert_${certId}.pdf`
+    );
+
+    console.log("✅ PDF with QR uploaded:", result.secure_url);
+
+    // Generate base64 QR untuk response
+    const base64QR = await QRCode.toDataURL(verifyUrl, {
+      errorCorrectionLevel: "H",
+      width: 300,
+      margin: 2,
+    });
+
+    return {
+      outputPath: result.secure_url,
+      verifyUrl,
+      base64QR,
+    };
+  } catch (error) {
+    console.error("❌ embedQRToPDF error:", error.message);
+    throw error;
+  }
 };
 
 /**
- * Generate QR Code dan upload ke Cloudinary
+ * Generate QR Code tanpa PDF
  */
 const generateQRCode = async (certId) => {
   const verifyUrl = `${process.env.QR_BASE_URL}/${certId}`;
@@ -95,7 +131,7 @@ const generateQRCode = async (certId) => {
   const result = await uploadBufferToCloudinary(
     buffer,
     "toefl-qrcodes",
-    `qr_${certId}`,
+    `qr_${certId}.pdf`
   );
 
   const base64 = await QRCode.toDataURL(verifyUrl, {
@@ -104,6 +140,7 @@ const generateQRCode = async (certId) => {
     margin: 2,
   });
 
+  const fileUrl = result.secure_url.replace("/upload/", "/upload/fl_attachment/");
   return {
     filePath: result.secure_url,
     base64,

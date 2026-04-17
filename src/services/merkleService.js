@@ -7,7 +7,7 @@ const { ethers } = require("ethers");
  * Hash dibuat dari kombinasi data penting sertifikat
  */
 const generateLeafHash = (certData) => {
-  const { certId, holderName, holderEmail, score, testDate } = certData;
+  const { certId, holderName, nim, score, testDate } = certData;
 
   // Encode data ke bytes lalu hash dengan keccak256
   const encoded = ethers.solidityPackedKeccak256(
@@ -15,7 +15,7 @@ const generateLeafHash = (certData) => {
     [
       certId,
       holderName,
-      holderEmail,
+      nim,
       score,
       Math.floor(new Date(testDate).getTime() / 1000),
     ]

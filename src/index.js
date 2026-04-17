@@ -85,6 +85,9 @@ const startServer = async () => {
     // Init Blockchain
     initBlockchain();
 
+
+    const cloudinary = require("./config/cloudinary");
+
     app.listen(PORT, () => {
       console.log("\n🚀 ================================");
       console.log(`   TOEFL Cert Backend Running`);
