@@ -9,6 +9,7 @@ const {
   revokeCertificate,
   getAllCertificates,
   getCertificateById,
+  embedCertificatePDF
 } = require("../controllers/certificateController");
 
 /**
@@ -32,6 +33,9 @@ router.post(
  * @desc    Terbitkan banyak sertifikat sekaligus
  */
 router.post("/issue-batch", validateBatch, issueBatch);
+
+router.post('/embed',
+   upload.single('file'), embedCertificatePDF)
 
 /**
  * @route   GET /api/certificates

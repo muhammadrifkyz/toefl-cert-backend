@@ -12,49 +12,59 @@ const {
   revokeCertificateOnChain,
 } = require("../services/blockchainService");
 
+
 // ============================================================
 // ISSUE SINGLE CERTIFICATE (FINAL OPTIMIZED)
 // ============================================================
 const issueCertificate = async (req, res) => {
   try {
-    const {
-      holderName,
-      nim,
-      score,
-      testDate,
-      expiryDate,
-      institution,
-    } = req.body;
+    // ================= NORMALISASI INPUT =================
+    const holderName = req.body.holderName
+    const nim = req.body.nim
+
+    // 🔥 FIX UTAMA (DUAL SUPPORT)
+    const score = req.body.totalSkor || req.body.score
+    const testDate = req.body.waktuMulai || req.body.testDate
+    const expiryDate = req.body.waktuSelesai || req.body.expiryDate
+
+    const institution = req.body.institution
 
     // ================= VALIDASI =================
+    if (!holderName || !nim || !score || !testDate || !expiryDate) {
+      return res.status(400).json({
+        success: false,
+        message: "Semua field wajib diisi",
+      })
+    }
+
     if (isNaN(score)) {
       return res.status(400).json({
         success: false,
         message: "Skor harus berupa angka",
-      });
+      })
     }
 
-    const certId = `TOEFL-${uuidv4().toUpperCase().slice(0, 8)}`;
-    const batchId = `BATCH-${Date.now()}`;
+    const certId = `TOEFL-${uuidv4().toUpperCase().slice(0, 8)}`
+    const batchId = `BATCH-${Date.now()}`
 
-    //======= MERKLE DULUAN DI BACKGROUND, RESPON CEPAT =======
-  const certData = {
-  certId,
-  holderName,
-  nim,
-  score: Number(score),
-  testDate,
-};
+    // ================= MERKLE =================
+    const certData = {
+      certId,
+      holderName,
+      nim,
+      score: Number(score),
+      testDate,
+    }
 
-const { merkleRoot, certsWithProof } = processBatch([certData]);
-const { leafHash, merkleProof } = certsWithProof[0];
+    const { merkleRoot, certsWithProof } = processBatch([certData])
+    const { leafHash, merkleProof } = certsWithProof[0]
 
-    // ================= SIMPAN AWAL (PENDING) =================
+    // ================= SIMPAN (PENDING) =================
     await Certificate.create({
       certId,
       holderName,
       nim,
-      score,
+      score: Number(score),
       testDate: new Date(testDate),
       expiryDate: new Date(expiryDate),
       institution: institution || "ETS - Educational Testing Service",
@@ -63,107 +73,70 @@ const { leafHash, merkleProof } = certsWithProof[0];
       merkleProof,
       leafHash,
       batchId,
-      
+
       status: "pending",
       issuedBy: req.issuerAddress || "system",
-    });
+    })
 
     // ================= RESPON CEPAT =================
     res.status(202).json({
-      success: true,
-      message: "Sertifikat sedang diproses",
-      certId,
-    });
+  success: true,
+  message: "Sertifikat sedang diproses",
+  data: {
+    certId,
+    holderName,
+    nim,
+    score: Number(score),
+    testDate,
+    expiryDate,
+    institution,
+    status: "pending"
+  }
+});
 
-    // ============================================================
-    // BACKGROUND PROCESS
-    // ============================================================
-    (async () => {
-      const start = Date.now();
-
+    // ================= BACKGROUND PROCESS =================
+    ;(async () => {
       try {
-        console.log("🚀 START ISSUE:", certId);
+        const txResult = await issueCertificateOnChain(certId, merkleRoot)
 
-        const certData = {
-          certId,
-          holderName,
-          nim,
-          score: Number(score),
-          testDate,
-        };
-
-        // ================= MERKLE =================
-        //const { merkleRoot, certsWithProof } = processBatch([certData]);
-        //const { leafHash, merkleProof } = certsWithProof[0];
-
-        // ================= BLOCKCHAIN =================
-        const startBlockchain = Date.now();
-
-        console.log("⛓️ KIRIM KE BLOCKCHAIN:", { certId, merkleRoot });
-        const txResult = await issueCertificateOnChain(certId, merkleRoot);
-
-        const blockchainTime = (Date.now() - startBlockchain) / 1000;
-        console.log("⛓️ Blockchain Time:", blockchainTime, "detik");
-
-        // ================= QR & PDF =================
-        let qrCodePath, pdfWithQRPath, base64QR, verifyUrl;
+        let qrCodePath, pdfWithQRPath
 
         if (req.file) {
-          const result = await embedQRToPDF(req.file.path, certId);
-          qrCodePath = result.outputPath;
-          pdfWithQRPath = result.outputPath;
-          base64QR = result.base64QR;
-          verifyUrl = result.verifyUrl;
+          const result = await embedQRToPDF(req.file.path, certId)
+          qrCodePath = result.outputPath
+          pdfWithQRPath = result.outputPath
         } else {
-          const qr = await generateQRCode(certId);
-          qrCodePath = qr.filePath;
-          base64QR = qr.base64;
-          verifyUrl = qr.verifyUrl;
+          const qr = await generateQRCode(certId)
+          qrCodePath = qr.filePath
         }
 
-        // ================= UPDATE → ISSUED =================
         await Certificate.findOneAndUpdate(
           { certId },
           {
-            merkleRoot,
-            merkleProof,
-            leafHash,
-            batchId,
             txHash: txResult.txHash,
             blockNumber: txResult.blockNumber,
             qrCodePath,
             filePath: pdfWithQRPath || null,
             status: "issued",
           }
-        );
-
-        const totalTime = (Date.now() - start) / 1000;
-
-        console.log("✅ ISSUE SUCCESS:", {
-          certId,
-          totalTime,
-          blockchainTime,
-        });
+        )
 
       } catch (err) {
-        console.error("❌ ISSUE FAILED:", err);
-
-        // ================= UPDATE → FAILED =================
         await Certificate.findOneAndUpdate(
           { certId },
           { status: "failed" }
-        );
+        )
       }
-    })();
+    })()
 
   } catch (error) {
-    console.error("issueCertificate error:", error);
+    console.error("issueCertificate error:", error)
     res.status(500).json({
       success: false,
       message: error.message,
-    });
+    })
   }
-};
+}
 // ============================================================
 // ISSUE BATCH CERTIFICATE
 // ============================================================
@@ -240,6 +213,57 @@ const issueBatch = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
+
+// ============================================================
+// EMBED QR KE PDF (UNTUK BATCH)
+// ============================================================
+const embedCertificatePDF = async (req, res) => {
+  try {
+    const { certId } = req.body
+
+    if (!certId || !req.file) {
+      return res.status(400).json({
+        success: false,
+        message: "certId dan file wajib diisi"
+      })
+    }
+
+    const cert = await Certificate.findOne({ certId })
+    if (!cert) {
+      return res.status(404).json({
+        success: false,
+        message: "Sertifikat tidak ditemukan"
+      })
+    }
+
+    // 🔥 reuse function kamu
+    const result = await embedQRToPDF(req.file.path, certId)
+
+    await Certificate.findOneAndUpdate(
+      { certId },
+      {
+        filePath: result.outputPath,
+        qrCodePath: result.outputPath
+      }
+    )
+
+    res.json({
+      success: true,
+      message: "QR berhasil di-embed",
+      data: {
+        certId,
+        pdfDownloadUrl: result.outputPath
+      }
+    })
+
+  } catch (err) {
+    console.error("embedCertificatePDF error:", err)
+    res.status(500).json({
+      success: false,
+      message: err.message
+    })
+  }
+}
 
 // ============================================================
 // VERIFY CERTIFICATE
@@ -412,4 +436,5 @@ module.exports = {
   revokeCertificate,
   getAllCertificates,
   getCertificateById,
+  embedCertificatePDF,
 };

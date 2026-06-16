@@ -35,10 +35,22 @@ const buildMerkleTree = (certsData) => {
   }
 
   // Generate leaf untuk setiap sertifikat
-  const leaves = certsData.map((cert) => {
-    const leaf = generateLeafHash(cert);
-    return Buffer.from(leaf.slice(2), "hex"); // remove 0x prefix
-  });
+  // const leaves = certsData.map((cert) => {
+  //   const leaf = generateLeafHash(cert);
+  //   return Buffer.from(leaf.slice(2), "hex"); // remove 0x prefix
+  // });
+  const leaves = certsData.map((cert, index) => {
+  const leaf = generateLeafHash(cert);
+
+  console.log("========== LEAF HASH ==========");
+  console.log("Sertifikat :", index + 1);
+  console.log("Nama :", cert.holderName);
+  console.log("Cert ID :", cert.certId);
+  console.log("Leaf Hash :", leaf);
+  //console.log("Proof : ", proof);
+
+  return Buffer.from(leaf.slice(2), "hex");
+});
 
   // Buat tree dengan opsi sortPairs untuk konsistensi
   const tree = new MerkleTree(leaves, keccak256, {
